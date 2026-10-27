@@ -1,0 +1,53 @@
+name: REA portable Git bundle (one-off backup)
+
+on:
+  push:
+    branches:
+      - archive/rea-bundle-20261027
+    paths:
+      - .github/workflows/rea-bundle-archive.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Make full-history upstream bundle, validate and record checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/rea-portable"
+          git clone --mirror https://github.com/morluto/rea.git "$RUNNER_TEMP/rea-upstream.git"
+          SOURCE_HEAD=$(git -C "$RUNNER_TEMP/rea-upstream.git" rev-parse refs/heads/main)
+          BUNDLE="$GITHUB_WORKSPACE/rea-portable/rea-upstream-2026-10-27.bundle"
+          git -C "$RUNNER_TEMP/rea-upstream.git" bundle create "$BUNDLE" --all
+          git -C "$RUNNER_TEMP/rea-upstream.git" bundle verify "$BUNDLE" > "$GITHUB_WORKSPACE/rea-portable/bundle-verify.txt" 2>&1
+          git clone --mirror -q "$BUNDLE" "$RUNNER_TEMP/rea-restore.git"
+          RESTORED_HEAD=$(git -C "$RUNNER_TEMP/rea-restore.git" rev-parse refs/heads/main)
+          test "$SOURCE_HEAD" = "$RESTORED_HEAD"
+          git -C "$RUNNER_TEMP/rea-upstream.git" show-ref > "$GITHUB_WORKSPACE/rea-portable/refs.txt"
+          (
+            cd "$GITHUB_WORKSPACE/rea-portable"
+            sha256sum rea-upstream-2026-10-27.bundle > SHA256SUMS.txt
+            printf 'Source: https://github.com/morluto/rea\n'
+            printf 'Backup date (UTC): 2026-10-27\n'
+            printf 'Source main commit: %s\n' "$SOURCE_HEAD"
+            printf 'Restored main commit: %s\n' "$RESTORED_HEAD"
+            printf 'Contents: Git reachable history of upstream branches and tags, including all blobs tracked by Git.\n'
+            printf 'Does NOT embed Git submodule repositories, Git LFS binary storage, npm binaries, or GitHub release assets.\n'
+            printf 'Restore: git clone rea-upstream-2026-10-27.bundle rea-restored\n'
+            printf 'Verify: git -C rea-restored rev-parse HEAD\n'
+            printf 'Integrity check: sha256sum -c SHA256SUMS.txt\n'
+          ) > "$GITHUB_WORKSPACE/rea-portable/RESTORE.txt"
+      - name: Upload bundle and restore notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: rea-portable-git-bundle-20261027
+          path: rea-portable/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
